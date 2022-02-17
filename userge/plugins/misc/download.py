@@ -18,6 +18,7 @@ from json import dumps
 from urllib.parse import unquote_plus
 
 from pySmartDL import SmartDL
+from pyrogram.types import Message as PyroMessage
 
 from userge import userge, Message, Config
 from userge.utils import progress, humanbytes, extract_entities
@@ -50,21 +51,19 @@ async def down_load_media(message: Message):
         await message.edit(f"Downloaded to `{dl_loc}` in {d_in} seconds")
 
 
-async def handle_download(message: Message, resource: Union[Message, str]) -> Tuple[str, int]:
+async def handle_download(message: Message, resource: Union[Message, str],
+                          from_url: bool = False) -> Tuple[str, int]:
     """ download from resource """
-    if not isinstance(resource, Message):
+    if not isinstance(resource, PyroMessage):
         return await url_download(message, resource)
     if resource.media_group_id:
         resources = await message.client.get_media_group(
-            message.chat.id,
+            resource.chat.id,
             resource.message_id
         )
         dlloc, din = [], 0
         for res in resources:
-            dl_loc, d_in = await tg_download(
-                message,
-                res
-            )
+            dl_loc, d_in = await tg_download(message, res, from_url)
             din += d_in
             dlloc.append(dl_loc)
         return dumps(dlloc), din
@@ -74,9 +73,10 @@ async def handle_download(message: Message, resource: Union[Message, str]) -> Tu
 async def url_download(message: Message, url: str) -> Tuple[str, int]:
     """ download from link """
     # pylint: disable=line-too-long
-    pattern = r"^(?:(?:https|tg):\/\/)?(?:www\.)?(?:t\.me\/|openmessage\?)(?:(?:c\/(\d+))|(\w+)|(?:user_id\=(\d+)))(?:\/|&message_id\=)(\d+)$"
+    pattern = r"^(?:(?:https|tg):\/\/)?(?:www\.)?(?:t\.me\/|openmessage\?)(?:(?:c\/(\d+))|(\w+)|(?:user_id\=(\d+)))(?:\/|&message_id\=)(\d+)(\?single)?$"
     # group 1: private supergroup id, group 2: chat username,
     # group 3: private group/chat id, group 4: message id
+    # group 5: check for download single media from media group
     match = re.search(pattern, url.split('|', 1)[0].strip())
     if match:
         chat_id = None
@@ -89,8 +89,8 @@ async def url_download(message: Message, url: str) -> Tuple[str, int]:
             chat_id = int(match.group(3))
         if chat_id and msg_id:
             resource = await message.client.get_messages(chat_id, msg_id)
-            if resource.media_group_id:
-                output = await handle_download(message, resource)
+            if resource.media_group_id and not bool(match.group(5)):
+                output = await handle_download(message, resource, True)
             elif resource.media:
                 output = await tg_download(message, resource, True)
             else:
