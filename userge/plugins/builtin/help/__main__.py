@@ -9,15 +9,15 @@
 # All rights reserved.
 
 from math import ceil
-from uuid import uuid4
 from typing import List, Callable, Dict, Union, Any
+from uuid import uuid4
 
 from pyrogram import filters
+from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified, MessageIdInvalid
 from pyrogram.types import (
     InlineQueryResultArticle, InputTextMessageContent,
     InlineKeyboardMarkup, InlineKeyboardButton,
     CallbackQuery, InlineQuery)
-from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified, MessageIdInvalid
 
 from userge import userge, Message, config, get_collection
 from userge.utils import is_command
@@ -31,7 +31,6 @@ _CATEGORY = {
     'misc': '💎'
 }
 SAVED_SETTINGS = get_collection("CONFIGS")
-PRVT_MSGS = {}
 
 
 @userge.on_start
@@ -44,11 +43,10 @@ async def _init() -> None:
 @userge.on_cmd("help", about={
     'header': "Guide to use USERGE commands",
     'flags': {'-i': "open help menu in inline"},
-    'usage': "{tr}help [flag | name]",
+    'usage': "{tr}help [flag] [plugin_name | command_name]",
     'examples': [
-        "{tr}help",
-        "{tr}help -i",
-        "{tr}help core"]}, allow_channels=False)
+        "{tr}help", "{tr}help -i", "{tr}help help",
+        "{tr}help core", "{tr}help loader"]}, allow_channels=False)
 async def helpme(message: Message) -> None:  # pylint: disable=missing-function-docstring
     plugins = userge.manager.loaded_plugins
 
@@ -58,20 +56,16 @@ async def helpme(message: Message) -> None:  # pylint: disable=missing-function-
         await userge.send_inline_bot_result(
             chat_id=message.chat.id,
             query_id=menu.query_id,
-            result_id=menu.results[1].id,
-            hide_via=True)
+            result_id=menu.results[1].id)
         return await message.delete()
 
     if not message.input_str:
-        out_str = f"""⚒ <b><u>(<code>{len(plugins)}</code>) Plugin(s) Available</u></b>\n\n"""
+        out_str = f"""({len(plugins)}) Plugins\n\n"""
         cat_plugins = userge.manager.get_plugins()
 
         for cat in sorted(cat_plugins):
-            out_str += (f"    {_CATEGORY.get(cat, '📁')} <b>{cat}</b> "
-                        f"(<code>{len(cat_plugins[cat])}</code>) :   <code>"
-                        + "</code>    <code>".join(sorted(cat_plugins[cat])) + "</code>\n\n")
-
-        out_str += f"""📕 <b>Usage:</b>  <code>{config.CMD_TRIGGER}help [plugin_name]</code>"""
+            out_str += (f"{_CATEGORY.get(cat, '📁')} {cat} ({len(cat_plugins[cat])}):  <code>"
+                        + "</code>  <code>".join(sorted(cat_plugins[cat])) + "</code>\n\n")
     else:
         key = message.input_str
 
@@ -81,18 +75,16 @@ async def helpme(message: Message) -> None:  # pylint: disable=missing-function-
                 and (len(plugins[key].loaded_commands) > 1
                      or plugins[key].loaded_commands[0].name.lstrip(config.CMD_TRIGGER) != key)):
             commands = plugins[key].loaded_commands
+            size = len(commands)
 
-            out_str = f"""⚔ <b><u>(<code>{len(commands)}</code>) Command(s) Available</u></b>
+            out_str = f"""<b>plugin</b>: <code>{key}</code>
+<b>category</b>: <i>{plugins[key].cat}</i>
+<b>doc</b>: <i>{plugins[key].doc}</i>
 
-🔧 <b>Plugin:</b>  <code>{key}</code>
-🎭 <b>Category:</b> <code>{plugins[key].cat}</code>
-📘 <b>Doc:</b>  <code>{plugins[key].doc}</code>\n\n"""
+({size}) <b>Command{'s' if size > 1 else ''}</b>\n\n"""
 
-            for i, cmd in enumerate(commands, start=1):
-                out_str += (f"    🤖 <b>cmd(<code>{i}</code>):</b>  <code>{cmd.name}</code>\n"
-                            f"    📚 <b>info:</b>  <i>{cmd.doc}</i>\n\n")
-
-            out_str += f"""📕 <b>Usage:</b>  <code>{config.CMD_TRIGGER}help [command_name]</code>"""
+            for cmd in commands:
+                out_str += f"<code>{cmd.name}</code>: <i>{cmd.doc}</i>\n"
 
         else:
             triggers = (config.CMD_TRIGGER, config.SUDO_TRIGGER, config.PUBLIC_TRIGGER)
@@ -100,20 +92,25 @@ async def helpme(message: Message) -> None:  # pylint: disable=missing-function-
             for _ in triggers:
                 key = key.lstrip(_)
 
-            out_str = f"<i>No Module or Command Found for</i>: <code>{message.input_str}</code>"
+            out_str = f"<i>No Plugin or Command found for</i>: <code>{message.input_str}</code>"
 
             for name, cmd in userge.manager.loaded_commands.items():
                 for _ in triggers:
                     name = name.lstrip(_)
 
                 if key == name:
-                    out_str = f"<code>{cmd.name}</code>\n\n{cmd.about}"
+                    out_str = f"""<b>command</b>: <code>{cmd.name}</code>
+<b>plugin</b>: <code>{cmd.plugin}</code>
+<b>category</b>: <i>{plugins[cmd.plugin].cat}</i>
+
+{cmd.about}"""
                     break
 
     await message.edit(out_str, del_in=0, parse_mode='html', disable_web_page_preview=True)
 
 
 if userge.has_bot:
+
     def check_owner(func):
         async def wrapper(_, c_q: CallbackQuery):
             if c_q.from_user and c_q.from_user.id in config.OWNER_ID:
@@ -131,7 +128,6 @@ if userge.has_bot:
                     show_alert=True)
 
         return wrapper
-
 
     @userge.bot.on_message(
         filters.private & filters.user(list(config.OWNER_ID)) & filters.command("start"), group=-1
@@ -157,7 +153,6 @@ if userge.has_bot:
 
         await msg.reply(out_str, parse_mode='html', disable_web_page_preview=True)
 
-
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"\((.+)\)(next|prev)\((\d+)\)"))
     @check_owner
     async def callback_next_prev(callback_query: CallbackQuery):
@@ -182,7 +177,6 @@ if userge.has_bot:
         await callback_query.edit_message_reply_markup(
             reply_markup=InlineKeyboardMarkup(buttons))
 
-
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"back\((.+)\)"))
     @check_owner
     async def callback_back(callback_query: CallbackQuery):
@@ -204,7 +198,6 @@ if userge.has_bot:
         await callback_query.edit_message_text(
             text, reply_markup=InlineKeyboardMarkup(buttons))
 
-
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"enter\((.+)\)"))
     @check_owner
     async def callback_enter(callback_query: CallbackQuery):
@@ -220,7 +213,6 @@ if userge.has_bot:
 
         await callback_query.edit_message_text(
             text, reply_markup=InlineKeyboardMarkup(buttons))
-
 
     @userge.bot.on_callback_query(
         filters=filters.regex(pattern=r"((?:un)?load)\((.+)\)"))
@@ -247,13 +239,11 @@ if userge.has_bot:
         await callback_query.edit_message_text(
             text, reply_markup=InlineKeyboardMarkup(buttons))
 
-
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"^mm$"))
     @check_owner
     async def callback_mm(callback_query: CallbackQuery):
         await callback_query.edit_message_text(
             "🖥 **Userge Main Menu** 🖥", reply_markup=InlineKeyboardMarkup(main_menu_buttons()))
-
 
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"^chgclnt$"))
     @check_owner
@@ -272,7 +262,6 @@ if userge.has_bot:
         await callback_query.edit_message_reply_markup(
             reply_markup=InlineKeyboardMarkup(main_menu_buttons()))
 
-
     @userge.bot.on_callback_query(filters=filters.regex(pattern=r"refresh\((.+)\)"))
     @check_owner
     async def callback_exit(callback_query: CallbackQuery):
@@ -286,29 +275,10 @@ if userge.has_bot:
         await callback_query.edit_message_text(
             text, reply_markup=InlineKeyboardMarkup(buttons))
 
-
-    @userge.bot.on_callback_query(filters=filters.regex(pattern=r"prvtmsg\((.+)\)"))
-    async def prvt_msg(_, c_q: CallbackQuery):
-        msg_id = str(c_q.matches[0].group(1))
-
-        if msg_id not in PRVT_MSGS:
-            await c_q.answer("message now outdated !", show_alert=True)
-            return
-
-        user_id, flname, msg = PRVT_MSGS[msg_id]
-
-        if c_q.from_user.id == user_id or c_q.from_user.id in config.OWNER_ID:
-            await c_q.answer(msg, show_alert=True)
-        else:
-            await c_q.answer(
-                f"Only {flname} can see this Private Msg... 😔", show_alert=True)
-
-
     def is_filter(name: str) -> bool:
         split_ = name.split('.')
 
         return bool(split_[0] and len(split_) == 2)
-
 
     def parse_buttons(page_num: int,
                       cur_pos: str,
@@ -339,12 +309,10 @@ if userge.has_bot:
 
         return pairs
 
-
     def main_menu_buttons():
         return parse_buttons(0, "mm",
                              lambda x: f"{_CATEGORY.get(x, '📁')} {x}",
                              userge.manager.get_all_plugins())
-
 
     def default_buttons(cur_pos: str):
         tmp_btns = []
@@ -366,7 +334,6 @@ if userge.has_bot:
 
         return [tmp_btns]
 
-
     def category_data(cur_pos: str):
         pos_list = cur_pos.split('|')
         plugins = userge.manager.get_all_plugins()[pos_list[1]]
@@ -380,7 +347,6 @@ if userge.has_bot:
 
         return text, buttons
 
-
     def plugin_data(cur_pos: str, p_num: int = 0):
 
         pos_list = cur_pos.split('|')
@@ -388,8 +354,8 @@ if userge.has_bot:
 
         text = f"""🗃 **--Plugin Status--** 🗃
 
-🎭 **Category** : `{pos_list[1]}`
 🔖 **Name** : `{plg.name}`
+🎭 **Category** : `{pos_list[1]}`
 📝 **Doc** : `{plg.doc}`
 ⚔ **Commands** : `{len(plg.commands)}`
 ⚖ **Filters** : `{len(plg.filters)}`
@@ -412,7 +378,6 @@ if userge.has_bot:
 
         return text, buttons
 
-
     def filter_data(cur_pos: str):
         pos_list = cur_pos.split('|')
         plg = userge.manager.plugins[pos_list[2]]
@@ -429,6 +394,7 @@ if userge.has_bot:
         if hasattr(flt, 'about'):
             text = f"""⚔ **--Command Status--**
 {flt_data}
+
 {flt.about}
 """
         else:
@@ -448,7 +414,6 @@ if userge.has_bot:
         buttons = [tmp_btns] + buttons
 
         return text, buttons
-
 
     @userge.bot.on_inline_query(group=1)
     async def inline_answer(_, inline_query: InlineQuery):
@@ -492,38 +457,7 @@ if userge.has_bot:
                 )
             )
 
-            if '-' in inline_query.query:
-                _id, msg = inline_query.query.split('-', maxsplit=1)
-                if not msg:
-                    return
-
-                if not msg.strip().endswith(':'):
-                    return
-
-                try:
-                    user = await userge.get_users(_id.strip())
-                except Exception:  # pylint: disable=broad-except
-                    return
-
-                PRVT_MSGS[inline_query.id] = (user.id, user.first_name, msg.strip(': '))
-
-                prvte_msg = [[InlineKeyboardButton(
-                    "Show Message 🔐", callback_data=f"prvtmsg({inline_query.id})")]]
-
-                msg_c = f"🔒 A **private message** to {'@' + user.username}, "
-                msg_c += "Only he/she can open it."
-
-                results.append(
-                    InlineQueryResultArticle(
-                        id=uuid4(),
-                        title=f"A Private Msg to {user.first_name}",
-                        input_message_content=InputTextMessageContent(msg_c),
-                        description="Only he/she can open it",
-                        thumb_url="https://imgur.com/download/Inyeb1S",
-                        reply_markup=InlineKeyboardMarkup(prvte_msg)
-                    )
-                )
-            elif "msg.err" in inline_query.query:
+            if "msg.err" in inline_query.query:
                 if ' ' not in inline_query.query:
                     return
 

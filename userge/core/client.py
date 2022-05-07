@@ -268,6 +268,9 @@ class Userge(_AbstractUserge):
         kwargs['session_name'] = config.SESSION_STRING or ":memory:"
         super().__init__(**kwargs)
 
+        if config.SESSION_STRING:
+            self.storage.name = config.SESSION_STRING
+
     @property
     def dual_mode(self) -> bool:
         return RawClient.DUAL_MODE
@@ -341,6 +344,7 @@ class Userge(_AbstractUserge):
 
         def _handle(num, _) -> None:
             _LOG.info(f"Received Stop Signal [{signal.Signals(num).name}], Exiting Userge ...")
+
             idle_event.set()
 
         for sig in (signal.SIGABRT, signal.SIGTERM, signal.SIGINT):
